@@ -121,6 +121,16 @@ pip install tensorflow
 python -c "import tensorflow as tf; print(tf.__version__)"
 ```
 
+Примечание. Если выходит ошибка "Недопустимая инструкция (образ памяти сброшен на диск)",
+значит ваш процессор не поддерживает AVX/AVX2, стандартные версии TensorFlow не будут работать,
+так как они требуют эти инструкции.
+
+Попробуйте удалить текущую и установить альтернативную версию:
+```
+pip uninstall tensorflow
+pip install --no-cache-dir https://github.com/yaroslavvb/tensorflow-community-wheels/releases/download/v2.10.0/tensorflow-2.10.0-cp39-cp39-linux_x86_64.whl
+```
+
 Установите OpenCV:
 ```
 pip install opencv-python
