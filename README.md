@@ -1,8 +1,8 @@
 # Проекты на Raspberry Pi совместно с другими контроллерами:
 
-1. [Блок **Lego Mindstorms EV3**](rpi_ev3brick/README.md)
-2. [Плата **Arduino Uno**](rpi_arduino/README.md)
-2. [Блок **DOBOT Magician**](rpi_dobot/README.md)
+1. [Блок **Lego Mindstorms EV3**](sorter_ev3brick/README.md)
+2. [Плата **Arduino Uno**](sorter_arduino/README.md)
+2. [Блок **DOBOT Magician**](sorter_dobot/README.md)
 
 ## Общая подготовка среды на Raspberry Pi
 
