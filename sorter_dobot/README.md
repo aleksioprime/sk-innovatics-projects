@@ -108,6 +108,35 @@ pyenv activate trash
 pyenv deactivate
 ```
 
+### Установка драйвера и настройка доступа
+
+Установите драйвер [VCP](https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers) (если потребуется)
+Подключите Dobot Magician и проверьте подключение USB:
+```
+lsusb
+```
+
+Если адаптер CP210x распознан, вы увидите строку, например:
+```
+Bus 001 Device 003: ID 10c4:ea60 Silicon Labs CP210x UART Bridge
+```
+
+Если в процессе запуска программ выходит ошибка `Permission denied: '/dev/ttyUSB0'`, то у вашего пользователя нет прав на доступ к порту `/dev/ttyUSB0`.
+
+Чтобы это исправить необходимо выполнить команду `sudo usermod -a -G dialout $USER`, чтобы убедиться, что доступ к `/dev/ttyUSB0` есть только у пользователей в группе `dialout`.
+
+Добавьте текущего пользователя в эту группу:
+```
+sudo usermod -a -G dialout $USER
+```
+Затем перезапустите систему.
+
+Временное решение (эта команда даст всем пользователям доступ к порту, но пропадёт после перезагрузки):
+```
+sudo chmod 666 /dev/ttyUSB0
+```
+
+
 ### Установка необходимых библиотек
 
 Обновите PIP:
@@ -132,16 +161,6 @@ pip install --no-cache-dir https://github.com/sld/Tensorflow-cpu_Docker-builder/
 Установите OpenCV:
 ```sh
 pip install opencv-python
-```
-
-Установите драйвер [VCP](https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers) (если потребуется)
-Подключите Dobot Magician и проверьте подключение USB:
-```
-lsusb
-```
-Если адаптер CP210x распознан, вы увидите строку, например:
-```
-Bus 001 Device 003: ID 10c4:ea60 Silicon Labs CP210x UART Bridge
 ```
 
 Установите библиотеки для работы с Dobot Magician:
