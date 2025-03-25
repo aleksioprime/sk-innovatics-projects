@@ -18,10 +18,12 @@ const int numSamples = 5;
 bool objectDetected = false;
 // Флаг для паузы перед включением моторов
 bool delayApplied = false;
+// Флаг для управления запуском/остановкой программы
+bool programStarted = false;
 
 void setup() {
     Serial.begin(9600);
-    Serial.println("START PROGRAM");
+    Serial.println("WAITING TO START...");
 
     // Настройка сервопривода
     myServo.attach(servoPin);
@@ -34,6 +36,44 @@ void setup() {
 }
 
 void loop() {
+    // Обработка всех входящих команд
+    if (Serial.available() > 0) {
+        String input = Serial.readStringUntil('\n');
+        input.trim();
+
+        Serial.print("COMMAND: ");
+        Serial.println(input);
+
+        if (input == "START") {
+            programStarted = true;
+            Serial.println("PROGRAM STARTED");
+            return;
+        } else if (input == "STOP") {
+            programStarted = false;
+            stopMotors();
+            objectDetected = false;
+            Serial.println("PROGRAM STOPPED");
+            return;
+        }
+
+        // Если программа не запущена — всё остальное игнорируем
+        if (!programStarted) {
+            Serial.println("Send 'START' to begin");
+            return;
+        }
+
+        // Если программа запущена и ждём команду после обнаружения объекта
+        if (objectDetected && (input == "BAD" || input == "GOOD" || input == "SKIP")) {
+            stopMotors();
+            moveServo(input);
+            objectDetected = false;
+        } else if (objectDetected) {
+            Serial.println("Error: wrong command. Wait...");
+        }
+    }
+
+    if (!programStarted) return;
+
     // Проверяем обнаружение объекта
     if (!objectDetected && isSharpIrDetected()) {
         objectDetected = true;
@@ -49,31 +89,14 @@ void loop() {
         startMotors();
         delayApplied = true; // Устанавливаем флаг, чтобы избежать повторной задержки
     }
-
-    // Если объект обнаружен, ждем команды
-    if (objectDetected && Serial.available() > 0) {
-        String command = Serial.readStringUntil('\n');
-        command.trim();
-
-        Serial.print("COMMAND: ");
-        Serial.println(command);
-
-        if (command == "BAD" || command == "GOOD" || command == "SKIP") {
-            stopMotors();
-            moveServo(command);
-            objectDetected = false;
-        } else {
-            Serial.println("Error: wrong command. Wait...");
-        }
-    }
 }
 
 // Запуск моторов
 void startMotors() {
     digitalWrite(DIR_1, LOW);
-    analogWrite(SPEED_1, 200);
+    analogWrite(SPEED_1, 250);
     digitalWrite(DIR_2, LOW);
-    analogWrite(SPEED_2, 200);
+    analogWrite(SPEED_2, 250);
 }
 
 // Остановка моторов
@@ -86,9 +109,9 @@ void stopMotors() {
 // Управление сервоприводом
 void moveServo(String command) {
     if (command == "BAD") {
-        myServo.write(0);
+        myServo.write(20);
     } else if (command == "GOOD") {
-        myServo.write(180);
+        myServo.write(160);
     }
     delay(2000);
     myServo.write(90);
@@ -114,7 +137,8 @@ bool isSharpIrDetected() {
     }
     int sensorValue = (samples[numSamples / 2 - 1] + samples[numSamples / 2]) / 2;
     float distance = pow((3027.4 / sensorValue), 1.2134);
-    if (distance < 10) distance = 10;
+    if (distance < 9) distance = 9;
     if (distance > 20) distance = 20;
-    return (distance < 11);
+    // Serial.println(distance);
+    return (distance < 10);
 }

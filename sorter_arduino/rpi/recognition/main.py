@@ -29,6 +29,10 @@ class Config:
     LABELS_PATH = os.path.join(BASE_DIR, "data", "labels.csv")
     HTML_TEMPLATE_PATH = os.path.join(BASE_DIR, "template", "index.html")
     PORT = 8000
+    BUFFER_SIZE = 50
+    CROP_SIZE = 400             # Размер квадратного изображения
+    CROP_OFFSET_X = 0           # Смещение по горизонтали от центра (в пикселях)
+    CROP_OFFSET_Y = -40         # Смещение по вертикали от центра (в пикселях)
 
 
 class FrameCollector(threading.Thread):
@@ -56,21 +60,61 @@ class FrameCollector(threading.Thread):
                     logging.warning("Failed to decode frame")
                     continue
 
-                predictions = self.classifier.classify(frame_image)
-                if predictions:
-                    best_class = predictions[0][0]
-                    self.frames_buffer.append(best_class)
+                frame_image = self.crop_center_square(frame_image)
 
-                    if len(self.frames_buffer) > 10:
-                        self.frames_buffer.pop(0)
+                global collecting_active
 
-                # Аннотируем кадр и сохраняем его для передачи в поток
-                self.last_annotated_frame = self.classifier.annotate_image(frame_image.copy(), predictions)
+                if collecting_active:
+                    predictions = self.classifier.classify(frame_image)
+
+                    if predictions:
+                        best_class = predictions[0][0]
+                        self.frames_buffer.append(best_class)
+
+                        global last_classification_result
+                        last_classification_result = best_class
+
+                        if len(self.frames_buffer) > Config.BUFFER_SIZE:
+                            self.frames_buffer.pop(0)
+
+                        print(f"[DEBUG] Buffer: {self.frames_buffer}")
+
+                    annotated = self.classifier.annotate_image(frame_image.copy(), predictions)
+                else:
+                    # Просто выводим "чистое" изображение без текста
+                    annotated = frame_image
+
+                self.last_annotated_frame = annotated
 
             except Exception as e:
                 logging.error(f"Frame collection error: {e}")
 
             time.sleep(0.1)  # Минимальная задержка, чтобы избежать перегрузки процессора
+
+    def crop_center_square(self, image):
+        """
+        Обрезает изображение в квадрат с заданным размером и смещением от центра.
+        """
+        h, w, _ = image.shape
+        size = Config.CROP_SIZE
+        offset_x = Config.CROP_OFFSET_X
+        offset_y = Config.CROP_OFFSET_Y
+
+        center_x = w // 2 + offset_x
+        center_y = h // 2 + offset_y
+
+        x1 = max(0, center_x - size // 2)
+        y1 = max(0, center_y - size // 2)
+        x2 = min(w, x1 + size)
+        y2 = min(h, y1 + size)
+
+        if x2 - x1 < size:
+            x1 = max(0, x2 - size)
+        if y2 - y1 < size:
+            y1 = max(0, y2 - size)
+
+        return image[y1:y2, x1:x2]
+
 
 
 class ArduinoHandler(threading.Thread):
@@ -121,7 +165,7 @@ class ArduinoHandler(threading.Thread):
         Функция распознавания кадров.
         Анализирует 10 последних предсказаний и возвращает преобладающий класс
         """
-        if len(self.frames_buffer) < 10:
+        if len(self.frames_buffer) < Config.BUFFER_SIZE:
             logging.warning("Not enough data for analysis")
             return 'RETURN'  # Недостаточно данных для анализа
 
@@ -129,32 +173,49 @@ class ArduinoHandler(threading.Thread):
         print(f"Most common class: {most_common_class}")
         return most_common_class
 
-    def update_frames_buffer(self, prediction):
-        """
-        Обновляет буфер предсказаний кадрами с камеры
-        """
-        self.frames_buffer.append(prediction)
-        if len(self.frames_buffer) > 10:
-            self.frames_buffer.pop(0)  # Удаляем самый старый кадр
-
     def run(self):
         """
         Запуск потока, который слушает сообщения от Arduino и отвечает на них.
         При отключении устройства пытается переподключиться.
         """
+        global collecting_active
+
         while self.running:
             try:
                 if self.ser and self.ser.in_waiting > 0:
                     message = self.ser.readline().decode('utf-8').strip()
                     logging.info(f"Arduino message: {message}")
-                    if message == 'STOP':
-                        result = self.recognize_frames()
-                        if result == 'thanos':
-                            self.ser.write("GOOD".encode('utf-8'))
-                        elif result == 'ironman':
-                            self.ser.write("BAD".encode('utf-8'))
-                        else :
-                            self.ser.write("SKIP".encode('utf-8'))
+
+                    # Добавляем в лог только если сообщение новое
+                    global arduino_log_messages
+                    if not arduino_log_messages or arduino_log_messages[-1] != message:
+                        arduino_log_messages.append(message)
+                    # Ограничиваем размер лога (например, последние 20 сообщений)
+                    if len(arduino_log_messages) > 20:
+                        arduino_log_messages.pop(0)
+
+                    # Если пришла команда от Arduino — запускаем сбор
+                    if message == 'Starting motors':
+                        collecting_active = True
+                        logging.info("Frame collection started")
+
+                # Если сбор активен и буфер заполнился — анализ и отправка
+                if collecting_active and len(self.frames_buffer) >= Config.BUFFER_SIZE:
+                    result = self.recognize_frames()
+                    logging.info(f"Result recognition: {result}")
+
+                    if result == 'good':
+                        self.ser.write("GOOD".encode('utf-8'))
+                    elif result == 'bad':
+                        self.ser.write("BAD".encode('utf-8'))
+                    else:
+                        self.ser.write("SKIP".encode('utf-8'))
+
+                    # После отправки — сброс
+                    self.frames_buffer.clear()
+                    collecting_active = False
+                    logging.info("Frame collection stopped and buffer cleared")
+
             except (serial.SerialException, OSError) as e:
                 logging.error(f"Serial error: {e}. Closing port and reconnecting...")
                 if self.ser:
@@ -269,6 +330,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
     """
     def do_GET(self):
         """Обрабатывает HTTP GET-запросы"""
+
         if self.path in ['/', '/index.html']:
             self.respond_with_html()
         elif self.path == '/stream.mjpg':
@@ -276,9 +338,42 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         elif self.path == '/favicon.ico':
             self.send_response(204)
             self.end_headers()
+        elif self.path.startswith("/serial/send"):
+            self.handle_serial_send()
+        elif self.path.startswith("/serial/log"):
+            self.handle_serial_log()
+        elif self.path.startswith("/classification/buffer"):
+            self.handle_buffer_status()
+        elif self.path.startswith("/classification/result"):
+            self.handle_classification_result()
+        elif self.path.startswith("/collection/status"):
+            self.handle_collection_status()
         else:
             self.send_error(404)
             self.end_headers()
+
+    def handle_collection_status(self):
+        global collecting_active
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+
+        import json
+        self.wfile.write(json.dumps({
+            "active": collecting_active
+        }).encode('utf-8'))
+
+    def handle_buffer_status(self):
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+
+        import json
+        buffer_contents = arduino_handler.frames_buffer
+        counter = Counter(buffer_contents)
+        self.wfile.write(json.dumps({
+            "counts": counter
+        }).encode('utf-8'))
 
     def respond_with_html(self):
         """Отправляет HTML-страницу клиенту"""
@@ -294,6 +389,45 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
         self.send_header('Content-Length', len(content))
         self.end_headers()
         self.wfile.write(content)
+
+    def handle_classification_result(self):
+        """Возвращает последний результат классификации"""
+        global last_classification_result
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+
+        import json
+        self.wfile.write(json.dumps({"recognized": last_classification_result}).encode('utf-8'))
+
+    def handle_serial_send(self):
+        import urllib.parse
+        parsed = urllib.parse.urlparse(self.path)
+        query = urllib.parse.parse_qs(parsed.query)
+        command = query.get("cmd", [None])[0]
+
+        if command and arduino_handler.ser:
+            try:
+                arduino_handler.ser.write((command + "\n").encode('utf-8'))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(f"Sent: {command}".encode('utf-8'))
+                return
+            except Exception as e:
+                logging.error(f"Failed to send command: {e}")
+
+        self.send_response(400)
+        self.end_headers()
+        self.wfile.write(b"Error: command not sent")
+
+    def handle_serial_log(self):
+        global arduino_log_messages
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+
+        import json
+        self.wfile.write(json.dumps({"messages": arduino_log_messages}).encode('utf-8'))
 
     def stream_video(self):
         """Запускает потоковую передачу видео MJPEG"""
@@ -342,6 +476,11 @@ if __name__ == '__main__':
     parser.add_argument("--flip", choices=["none", "h", "v", "hv"], default="none",
                         help="Set flip mode: 'none' (default), 'h' (horizontal), 'v' (vertical), 'hv' (both)")
     args = parser.parse_args()
+
+    # Глобальные переменные
+    collecting_active = False
+    arduino_log_messages = []
+    last_classification_result = "-"
 
     # Инициализируем ArduinoHandler в отдельном потоке
     arduino_handler = ArduinoHandler()

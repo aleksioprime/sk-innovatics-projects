@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>Intelligent vegetable sorting</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+
+    img {
+      border: 1px solid #ccc;
+      margin-bottom: 10px;
+    }
+
+    .status {
+      margin: 10px 0;
+      font-weight: bold;
+    }
+
+    #log {
+      border: 1px solid #ddd;
+      height: 150px;
+      overflow-y: scroll;
+      padding: 10px;
+      background: #f9f9f9;
+    }
+
+    #log div {
+      font-size: 14px;
+      margin-bottom: 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Intelligent vegetable sorting</h1>
+
+  <div style="display: flex; align-items: flex-start; gap: 40px;">
+
+    <!-- Левая часть: изображение -->
+    <div>
+      <img src="stream.mjpg" width="480" height="480" />
+    </div>
+
+    <!-- Правая часть: статус, кнопки и лог -->
+    <div style="flex: 1;">
+      <div class="status">Статус программы: <span id="status">Остановлена</span></div>
+      <button onclick="sendCommand('START')">Запустить</button>
+      <button onclick="sendCommand('STOP')">Остановить</button>
+
+      <div class="status">Сбор кадров: <span id="collectorStatus">-</span></div>
+
+      <div class="status">Распознанный объект: <span id="recognized">-</span></div>
+      <div class="status">Буфер предсказаний:</div>
+      <ul id="buffered" style="padding-left: 20px;"></ul>
+
+      <div style="margin-top: 15px;">
+        <input type="text" id="customCommand" placeholder="Введите команду (например, GOOD)" />
+        <button onclick="sendCustomCommand()">Отправить</button>
+      </div>
+
+      <h3>Сообщения от Arduino:</h3>
+      <div id="log"></div>
+    </div>
+
+  </div>
+
+  <script>
+    const logDiv = document.getElementById('log');
+    const statusSpan = document.getElementById('status');
+    const recognizedSpan = document.getElementById('recognized');
+    const bufferedList = document.getElementById('buffered');
+
+    let lastNonEmptyCounts = {};  // 🧠 сюда сохраним последнее заполнение
+
+    function appendLog(message) {
+      const entry = document.createElement('div');
+      entry.textContent = message;
+      logDiv.appendChild(entry);
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function updateBufferDisplay(counts) {
+      bufferedList.innerHTML = '';
+      Object.entries(counts).forEach(([key, value]) => {
+        const li = document.createElement('li');
+        li.textContent = `${key}: ${value}`;
+        if (key === 'good') li.style.color = 'green';
+        else if (key === 'bad') li.style.color = 'red';
+        else li.style.color = 'gray';
+        bufferedList.appendChild(li);
+      });
+    }
+
+    function sendCommand(cmd) {
+      fetch(`/serial/send?cmd=${cmd}`)
+        .then(response => response.text())
+        .then(text => appendLog(`➡ Отправлено: ${cmd}`))
+        .catch(err => appendLog(`❌ Ошибка отправки: ${err}`));
+
+      if (cmd === 'START') statusSpan.textContent = 'Работает';
+      if (cmd === 'STOP') {
+        statusSpan.textContent = 'Остановлена';
+        recognizedSpan.textContent = '-';
+      }
+    }
+
+    function sendCustomCommand() {
+      const input = document.getElementById('customCommand');
+      const value = input.value.trim();
+      if (value) {
+        sendCommand(value);
+        input.value = '';
+      }
+    }
+
+    // Периодически получаем сообщения от Arduino
+    setInterval(() => {
+      fetch('/serial/log')
+        .then(response => response.json())
+        .then(data => {
+          if (data.messages) {
+            logDiv.innerHTML = ''; // Очищаем лог перед обновлением
+            data.messages.forEach(msg => {
+              appendLog(`⬅ Arduino: ${msg}`);
+            });
+          }
+        });
+    }, 2000);
+
+    setInterval(() => {
+      fetch('/classification/buffer')
+        .then(response => response.json())
+        .then(data => {
+          const counts = data.counts || {};
+          if (Object.keys(counts).length > 0) {
+            lastNonEmptyCounts = counts; // Сохраняем последнее заполнение
+            updateBufferDisplay(counts);
+          } else {
+            // Не очищаем, оставляем предыдущее состояние
+            // Можно добавить серую надпись, если хочешь:
+            // const li = document.createElement('li');
+            // li.textContent = '(буфер очищен)';
+            // li.style.color = 'gray';
+            // bufferedList.appendChild(li);
+          }
+        });
+    }, 2000);
+
+    setInterval(() => {
+      fetch('/classification/result')
+        .then(response => response.json())
+        .then(data => {
+          if (data.recognized) {
+            recognizedSpan.textContent = data.recognized;
+          }
+        });
+    }, 2000);
+
+    setInterval(() => {
+      fetch('/collection/status')
+        .then(response => response.json())
+        .then(data => {
+          const collectorStatus = document.getElementById('collectorStatus');
+          collectorStatus.textContent = data.active ? 'ВКЛ' : 'ВЫКЛ';
+        });
+    }, 2000);
+
+  </script>
+</body>
+
+</html>
