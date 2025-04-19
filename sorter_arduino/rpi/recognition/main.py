@@ -169,7 +169,13 @@ class ArduinoHandler(threading.Thread):
             logging.warning("Not enough data for analysis")
             return 'RETURN'  # Недостаточно данных для анализа
 
-        most_common_class = Counter(self.frames_buffer).most_common(1)[0][0]
+        counter = Counter(self.frames_buffer)
+
+        if counter.get("bad", 0) > 5:
+            print("Detected BAD more then 5 times")
+            return "bad"
+
+        most_common_class = counter.most_common(1)[0][0]
         print(f"Most common class: {most_common_class}")
         return most_common_class
 

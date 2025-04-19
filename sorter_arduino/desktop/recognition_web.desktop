@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Recognition Web
+Comment=Run Web-Interface for RecognitionApp
+Type=Link
+URL=http://127.0.0.1:8000
+Icon=web-browser

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Recognition App
+Comment=Run program for Recognition
+Exec=bash -c "source ~/venv/bin/activate && python ~/stem/recognition/main.py"
+Icon=utilites-terminal
+Terminal=true
+Type=Application
+Categories=Utility
